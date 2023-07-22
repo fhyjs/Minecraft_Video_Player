@@ -15,6 +15,7 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
     implementation group: 'org.bytedeco', name: 'javacv-platform', version: '1.5.9'
     implementation(files('libs/telnet_mc-1.0-SNAPSHOT-all.jar'))
+    implementation(files('libs/Spritecraft.jar'))
 }
 tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'

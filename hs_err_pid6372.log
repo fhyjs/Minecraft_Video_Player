@@ -1,0 +1,59 @@
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  EXCEPTION_ACCESS_VIOLATION (0xc0000005) at pc=0x00007ffb05759868, pid=6372, tid=33488
+#
+# JRE version: Java(TM) SE Runtime Environment (11.0.2+9) (build 11.0.2+9-LTS)
+# Java VM: Java HotSpot(TM) 64-Bit Server VM (11.0.2+9-LTS, mixed mode, tiered, compressed oops, g1 gc, windows-amd64)
+# Problematic frame:
+# C  0x00007ffb05759868
+#
+# No core dump will be written. Minidumps are not enabled by default on client versions of Windows
+#
+# If you would like to submit a bug report, please visit:
+#   http://bugreport.java.com/bugreport/crash.jsp
+# The crash happened outside the Java Virtual Machine in native code.
+# See problematic frame for where to report the bug.
+#
+
+---------------  S U M M A R Y ------------
+
+Command Line: -agentlib:jdwp=transport=dt_socket,server=n,suspend=y,address=127.0.0.1:56539 -Dfile.encoding=windows-1252 -Duser.country=US -Duser.language=en -Duser.variant org.eu.hanana.reimu.mcvp.Main -h 127.0.0.1:23
+
+Host: 11th Gen Intel(R) Core(TM) i7-11700 @ 2.50GHz, 16 cores, 15G,  Windows 10 , 64 bit Build 25905 (10.0.25905.1000)
+Time: Sun Jul 23 21:04:51 2023 China Standard Time elapsed time: 17 seconds (0d 0h 0m 17s)
+
+---------------  T H R E A D  ---------------
+
+Current thread (0x0000015310d49800):  JavaThread "Thread-597" [_thread_in_native, id=33488, stack(0x0000003bd5400000,0x0000003bd5500000)]
+
+Stack: [0x0000003bd5400000,0x0000003bd5500000],  sp=0x0000003bd54fed60,  free space=1019k
+Native frames: (J=compiled Java code, j=interpreted, Vv=VM code, C=native code)
+C  0x00007ffb05759868
+
+Java frames: (J=compiled Java code, j=interpreted, Vv=VM code)
+J 2289  org.bytedeco.opencv.global.opencv_core.flip(Lorg/bytedeco/opencv/opencv_core/Mat;Lorg/bytedeco/opencv/opencv_core/Mat;I)V (0 bytes) @ 0x0000015343e941bb [0x0000015343e94140+0x000000000000007b]
+J 2170 c1 org.eu.hanana.reimu.mcvp.Glutil.flipFrame(Lorg/bytedeco/javacv/Frame;ZZ)Lorg/bytedeco/javacv/Frame; (62 bytes) @ 0x000001533cc79004 [0x000001533cc78da0+0x0000000000000264]
+J 2169 c1 org.eu.hanana.reimu.mcvp.FuncPlayvid$FrameShow.run()V (61 bytes) @ 0x000001533cc79654 [0x000001533cc795c0+0x0000000000000094]
+v  ~StubRoutines::call_stub
+
+siginfo: EXCEPTION_ACCESS_VIOLATION (0xc0000005), reading address 0x0000015303f73e00
+
+
+Register to memory mapping:
+
+RIP=0x00007ffb05759868 points into unknown readable memory: 0f b6 04 39 41 88 00 88
+RAX=0x000001537b001010 points into unknown readable memory: 00 be 03 00 01 be 03 00
+RBX=0x0000015303f38000 points into unknown readable memory: 30 00 f0 ff 30 00 f0 ff
+RCX=0x000000000003be00 is an unknown value
+RDX=0x0000000000000030 is an unknown value
+RSP=0x0000003bd54fed60 is pointing into the stack for thread: 0x0000015310d49800
+RBP=0x0000003bd54ff480 is pointing into the stack for thread: 0x0000015310d49800
+RSI=0x0000000000000132 is an unknown value
+RDI=0x0000015303f38000 points into unknown readable memory: 30 00 f0 ff 30 00 f0 ff
+R8 =0x0000015303f38000 points into unknown readable memory: 30 00 f0 ff 30 00 f0 ff
+R9 =0x000001537b001010 points into unknown readable memory: 00 be 03 00 01 be 03 00
+R10=0x000000000001e000 is an unknown value
+R11=0x0 is NULL
+R12=0x000000000001e000 is an unknown value
+R13=

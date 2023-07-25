@@ -6,6 +6,7 @@ import org.bytedeco.javacv.OpenCVFrameConverter;
 import org.bytedeco.opencv.opencv_core.Mat;
 
 import java.awt.image.BufferedImage;
+import java.nio.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
@@ -14,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import static org.bytedeco.opencv.global.opencv_core.flip;
+import static org.bytedeco.opencv.global.opencv_core.shiftLeft;
 
 public class Glutil {
     // 分割图像
@@ -48,6 +50,16 @@ public class Glutil {
         }
 
         return outputImage;
+    }
+
+    public static byte[] extractAudioData(Frame frame) {
+        short [] data = new short[((ShortBuffer) frame.samples[0]).capacity()];
+
+        for (int i = 0; i < ((ShortBuffer) frame.samples[0]).capacity(); i++) {
+            data[i]=((ShortBuffer) frame.samples[0]).get(i);
+        }
+
+        return Mathutil.shortArrayToByteArray(data);
     }
     public static Frame flipFrame(Frame frame, boolean flipHorizontal, boolean flipVertical) {
         if (frame == null) {

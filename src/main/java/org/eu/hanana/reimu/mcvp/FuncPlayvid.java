@@ -5,23 +5,37 @@ import com.diamondpants.spritecraft.Generator;
 import com.diamondpants.spritecraft.MaterialSet;
 import com.diamondpants.spritecraft.frontend.MainFrame;
 import com.diamondpants.spritecraft.ticators.Imageticator;
+import javazoom.jl.player.Player;
+import org.bytedeco.ffmpeg.global.avcodec;
+import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.*;
 import org.bytedeco.javacv.Frame;
 import org.eu.hanana.reimu.tnmc.Base;
 import org.eu.hanana.reimu.tnmc.ExTelnet;
 import org.eu.hanana.reimu.tnmc.FuncBase;
+import org.lwjgl.openal.*;
+import org.lwjgl.system.MemoryUtil;
 
+import javax.sound.sampled.*;
+import javax.swing.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.*;
 import java.util.*;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
-import static org.eu.hanana.reimu.mcvp.Glutil.mergeImages;
-import static org.eu.hanana.reimu.mcvp.Glutil.splitImage;
+import static org.eu.hanana.reimu.mcvp.Glutil.*;
+import static org.eu.hanana.reimu.mcvp.Mcutil.say;
+import static org.lwjgl.openal.ALC10.*;
+import static org.lwjgl.openal.ALC11.ALC_ALL_DEVICES_SPECIFIER;
+import static org.lwjgl.openal.EXTThreadLocalContext.alcSetThreadContext;
+import static org.lwjgl.system.MemoryUtil.NULL;
 
 public class FuncPlayvid implements FuncBase,Runnable {
     Generator generator;
@@ -31,47 +45,179 @@ public class FuncPlayvid implements FuncBase,Runnable {
     Map<Integer,ExTelnet> conns = new HashMap<>();
     public boolean nextframe;
     FFmpegFrameGrabber frameGrabber;
+    private AudioFormat af = null;
+    private SourceDataLine sourceDataLine;
+    private DataLine.Info dataLineInfo;
     private boolean shouldProceed = false; // 是否应该继续处理下一帧
     @Deprecated(since = "Deprecated")
     @Override
     public void run() {
         //CanvasFrame canvasFrame = new CanvasFrame("sss");
         //canvasFrame.setVisible(true);
+
         // 创建视频帧抓取器
-        frameGrabber = new FFmpegFrameGrabber("C:\\Users\\a\\Downloads\\Video\\av12.mp4");
+        frameGrabber = new FFmpegFrameGrabber(args[8]);
+        boolean audio = Mcutil.getSide().equals(Mcutil.Side.CLIENT)&&Boolean.parseBoolean(args[9]);
         int threadNum = blocks.size()/500;
         try {
             for (int i = 0; i < threadNum; i++) {
                 conns.put(i,new ExTelnet(Base.host));
             }
+            say("thread was created");
             frameGrabber.start();
-            Frame frame;
+            //frameGrabber.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
+            //frameGrabber.setSampleFormat(avutil.AV_SAMPLE_FMT_DBL);
             VidTicker ticker = new VidTicker();
-            ticker.start();
-            while ((frame = frameGrabber.grabImage()) != null) {
-                try {
-                    frame = Glutil.flipFrame(frame,true,false);
-                    // 分割图像
-                    List<BufferedImage> subImages = splitImage(new Java2DFrameConverter().convert(frame), threadNum);
-                    // 多线程
-                    procImages(subImages, threadNum);
-                    synchronized (this) {
-                        while (!shouldProceed) {
-                            wait(); // 等待 shouldProceed 为 true 时唤醒
+            final ExecutorService audioExecutor = Executors.newSingleThreadExecutor();
+            // 获取音频采样率、位深度和通道数
+            int sampleRate = frameGrabber.getSampleRate();
+            int channels = frameGrabber.getAudioChannels();
+            int bufferId;
+            if (audio){
+                // 初始化 OpenAL
+                long device = alcOpenDevice((CharSequence) null);
+                if (device == NULL) {
+                    throw new IllegalStateException("Failed to open an OpenAL device.");
+                }
+
+                ALCCapabilities deviceCaps = ALC.createCapabilities(device);
+
+                if (!deviceCaps.OpenALC10) {
+                    throw new IllegalStateException();
+                }
+                System.out.println("OpenALC10  : " + deviceCaps.OpenALC10);
+                System.out.println("OpenALC11  : " + deviceCaps.OpenALC11);
+                System.out.println("ALC_EXT_EFX: " + deviceCaps.ALC_EXT_EFX);
+
+                if (deviceCaps.OpenALC11) {
+                    List<String> devices = ALUtil.getStringList(NULL, ALC_ALL_DEVICES_SPECIFIER);
+                    if (devices == null) {
+                        checkALCError(NULL);
+                    } else {
+                        for (int i = 0; i < devices.size(); i++) {
+                            System.out.println(i + ": " + devices.get(i));
                         }
-                        shouldProceed = false; // 处理完一帧后置为 false，等待下一次唤醒
+                    }
+                }
+
+                String defaultDeviceSpecifier = Objects.requireNonNull(alcGetString(NULL, ALC_DEFAULT_DEVICE_SPECIFIER));
+                System.out.println("Default device: " + defaultDeviceSpecifier);
+
+                System.out.println("ALC device specifier: " + alcGetString(device, ALC_DEVICE_SPECIFIER));
+
+                final long context = alcCreateContext(device, (IntBuffer)null);
+                checkALCError(device);
+
+                boolean useTLC = deviceCaps.ALC_EXT_thread_local_context && alcSetThreadContext(context);
+                if (!useTLC) {
+                    if (!alcMakeContextCurrent(context)) {
+                        throw new IllegalStateException();
+                    }
+                }
+                checkALCError(device);
+
+                ALCapabilities caps = AL.createCapabilities(deviceCaps, MemoryUtil::memCallocPointer);
+                AL.setCurrentProcess(caps);
+                // 创建 OpenAL 缓冲区
+                bufferId = AL10.alGenBuffers();
+            } else {
+                bufferId = 0;
+            }
+            ticker.start();
+            Frame frame;
+            say("ok");
+            while (( frame = frameGrabber.grab()) != null) {
+                try {
+                    if (frame.type == Frame.Type.VIDEO) {
+                        frame = Glutil.flipFrame(frame, true, false);
+                        // 分割图像
+                        List<BufferedImage> subImages = splitImage(new Java2DFrameConverter().convert(frame), threadNum);
+                        // 多线程
+                        procImages(subImages, threadNum);
+                    }
+                    int sourceId = 0;
+                    if (audio && frame.type == Frame.Type.AUDIO) {
+
+                        Buffer buffer = frame.samples[0];
+                        if (buffer instanceof ByteBuffer)
+                            AL10.alBufferData(bufferId, AL10.AL_FORMAT_STEREO16, ((ByteBuffer) buffer), sampleRate);
+                        else if (buffer instanceof ShortBuffer)
+                            AL10.alBufferData(bufferId, AL10.AL_FORMAT_STEREO16, ((ShortBuffer) buffer), sampleRate);
+                        else if (buffer instanceof FloatBuffer)
+                            AL10.alBufferData(bufferId, AL10.AL_FORMAT_STEREO16, ((FloatBuffer) buffer), sampleRate);
+                        else throw new RuntimeException("unknown format");
+                        // 创建 OpenAL 源
+                        sourceId = AL10.alGenSources();
+                        AL10.alSourcei(sourceId, AL10.AL_BUFFER, bufferId);
+
+                        // 播放音频
+                        AL10.alSourcePlay(sourceId);
                     }
 
-                } catch (InterruptedException e) {
+                    synchronized (this) {
+
+                        if (frame.type == Frame.Type.VIDEO) {
+                            while (!shouldProceed) {
+                                wait(); // 等待 shouldProceed 为 true 时唤醒
+                            }
+                            shouldProceed = false; // 处理完一帧后置为 false，等待下一次唤醒
+                        }
+                        if (frame.type == Frame.Type.AUDIO&&audio) {
+                            ticker.suspend();
+                            while (AL10.alGetSourcei(sourceId, AL10.AL_SOURCE_STATE) == AL10.AL_PLAYING) {
+
+                            }
+                            ticker.resume();
+                        }
+                    }
+                    // 等待音频播放结束
+
+                    if (audio){
+
+                        // 删除 OpenAL 源
+                        AL10.alSourceStop(sourceId);
+                        AL10.alDeleteSources(sourceId);
+                    }
+ 
+
+                } catch (Throwable e) {
                     throw new RuntimeException(e);
                 }
             }
+            if (audio){
+                // 删除 OpenAL 缓冲区
+                AL10.alDeleteBuffers(bufferId);
+                ALC.destroy();
+            }
             ticker.stop();
             frameGrabber.stop();
+            frameGrabber.release();
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
+    static void checkALCError(long device) {
+        int err = alcGetError(device);
+        if (err != ALC_NO_ERROR) {
+            throw new RuntimeException(alcGetString(device, err));
+        }
+    }
+    byte[] combine;
+    private void processAudio(Buffer[] samples) {
+        combine=new byte[samples[0].remaining()];
+        int i=0;
+        ByteArrayOutputStream bas;
+        bas=new ByteArrayOutputStream();
+        while (samples[0].hasRemaining()){
+            if (samples[0] instanceof ByteBuffer)
+                bas.write(((ByteBuffer) samples[0]).get());
+            if (samples[0] instanceof ShortBuffer)
+                bas.write(((ShortBuffer) samples[0]).get());
+            i++;
+        }
+        sourceDataLine.write(bas.toByteArray(), 0,bas.size());
+    }
+
     private class VidTicker extends Thread{
         @Override
         public void run() {
@@ -137,8 +283,11 @@ public class FuncPlayvid implements FuncBase,Runnable {
 
     }
     int x1,x2,y1,y2,z1,z2,x0,y0,z0;
+    private String[] args;
     @Override
     public void run(String[] args) {
+        this.args=args;
+        say("playvid is starting");
          x1=Integer.parseInt(args[1]);
          y1=Integer.parseInt(args[2]);
          z1=Integer.parseInt(args[3]);
@@ -191,6 +340,7 @@ public class FuncPlayvid implements FuncBase,Runnable {
             y0=Math.min(y1,y2);
             x0=Math.min(x1,x2);
         }
+        say("pos was sat");
         for (BlockPos block : blocks) {
             try {
                 Main.baseTelnet.send(String.format("/setblock %d %d %d minecraft:%s", block.x,block.y,block.z,args[7]));
@@ -198,8 +348,10 @@ public class FuncPlayvid implements FuncBase,Runnable {
                 throw new RuntimeException(e);
             }
         }
+        say("block filled");
         generator.getMaterialSet().setAll();
         generator.setSideView(false);
+        say("change to working thread");
         new Thread(this).start();
     }
     private static Frame scaleFrame(Frame frame, double sw,double sh) {

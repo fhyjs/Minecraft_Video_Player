@@ -15,6 +15,15 @@ import org.eu.hanana.reimu.tnmc.ExTelnet;
 import org.eu.hanana.reimu.tnmc.FuncBase;
 import org.lwjgl.openal.*;
 import org.lwjgl.system.MemoryUtil;
+import uk.co.caprica.vlcj.factory.MediaPlayerFactory;
+import uk.co.caprica.vlcj.player.base.MediaPlayer;
+import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter;
+import uk.co.caprica.vlcj.player.component.EmbeddedMediaListPlayerComponent;
+import uk.co.caprica.vlcj.player.component.EmbeddedMediaPlayerComponent;
+import uk.co.caprica.vlcj.player.embedded.videosurface.ComponentVideoSurface;
+import uk.co.caprica.vlcj.player.embedded.videosurface.VideoSurface;
+import uk.co.caprica.vlcj.player.embedded.videosurface.WindowsVideoSurfaceAdapter;
+import uk.co.caprica.vlcj.player.embedded.videosurface.callback.RenderCallback;
 
 import javax.sound.sampled.*;
 import javax.swing.*;
@@ -32,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.eu.hanana.reimu.mcvp.Glutil.*;
 import static org.eu.hanana.reimu.mcvp.Mcutil.say;
+import static org.eu.hanana.reimu.tnmc.Base.regFunc;
 import static org.lwjgl.openal.ALC10.*;
 import static org.lwjgl.openal.ALC11.ALC_ALL_DEVICES_SPECIFIER;
 import static org.lwjgl.openal.EXTThreadLocalContext.alcSetThreadContext;
@@ -49,6 +59,8 @@ public class FuncPlayvid implements FuncBase,Runnable {
     private SourceDataLine sourceDataLine;
     private DataLine.Info dataLineInfo;
     private boolean shouldProceed = false; // 是否应该继续处理下一帧
+    boolean playing ;
+
     @Deprecated(since = "Deprecated")
     @Override
     public void run() {
@@ -65,15 +77,54 @@ public class FuncPlayvid implements FuncBase,Runnable {
             }
             say("thread was created");
             frameGrabber.start();
-            //frameGrabber.setAudioCodec(avcodec.AV_CODEC_ID_AAC);
-            //frameGrabber.setSampleFormat(avutil.AV_SAMPLE_FMT_DBL);
             VidTicker ticker = new VidTicker();
-            final ExecutorService audioExecutor = Executors.newSingleThreadExecutor();
-            // 获取音频采样率、位深度和通道数
-            int sampleRate = frameGrabber.getSampleRate();
-            int channels = frameGrabber.getAudioChannels();
-            int bufferId;
+            Frame frame;
+            say("ok");
             if (audio){
+                new Thread(this::Caudio).start();
+                synchronized (this) {
+                    wait();
+                }
+            }
+            ticker.start();
+            while (( frame = frameGrabber.grabImage()) != null) {
+                try {
+                    if (frame.type == Frame.Type.VIDEO) {
+                        frame = Glutil.flipFrame(frame, true, false);
+                        // 分割图像
+                        List<BufferedImage> subImages = splitImage(new Java2DFrameConverter().convert(frame), threadNum);
+                        // 多线程
+                        procImages(subImages, threadNum);
+                    }
+
+                    synchronized (this) {
+
+                        if (frame.type == Frame.Type.VIDEO) {
+                            while (!shouldProceed) {
+                                wait(); // 等待 shouldProceed 为 true 时唤醒
+                            }
+                            shouldProceed = false; // 处理完一帧后置为 false，等待下一次唤醒
+                        }
+                    }
+ 
+
+                } catch (Throwable e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            ticker.stop();
+            frameGrabber.stop();
+            frameGrabber.release();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    @Deprecated(since = "Deprecated")
+    public void Caudio() {
+        try {
+            FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(args[8]);
+            int sampleRate = frameGrabber.getSampleRate();
+            int bufferId;
                 // 初始化 OpenAL
                 long device = alcOpenDevice((CharSequence) null);
                 if (device == NULL) {
@@ -120,23 +171,16 @@ public class FuncPlayvid implements FuncBase,Runnable {
                 AL.setCurrentProcess(caps);
                 // 创建 OpenAL 缓冲区
                 bufferId = AL10.alGenBuffers();
-            } else {
-                bufferId = 0;
-            }
-            ticker.start();
             Frame frame;
-            say("ok");
-            while (( frame = frameGrabber.grab()) != null) {
+            double playSoundTimeMillis = -1;
+            synchronized (FuncPlayvid.this){
+                FuncPlayvid.this.notify();
+            }
+            grabber.start();
+            while (( frame = grabber.grabSamples()) != null) {
                 try {
-                    if (frame.type == Frame.Type.VIDEO) {
-                        frame = Glutil.flipFrame(frame, true, false);
-                        // 分割图像
-                        List<BufferedImage> subImages = splitImage(new Java2DFrameConverter().convert(frame), threadNum);
-                        // 多线程
-                        procImages(subImages, threadNum);
-                    }
                     int sourceId = 0;
-                    if (audio && frame.type == Frame.Type.AUDIO) {
+                    if (frame.type == Frame.Type.AUDIO) {
 
                         Buffer buffer = frame.samples[0];
                         if (buffer instanceof ByteBuffer)
@@ -155,43 +199,42 @@ public class FuncPlayvid implements FuncBase,Runnable {
                     }
 
                     synchronized (this) {
+                        if (frame.type == Frame.Type.AUDIO) {
+                            if (playSoundTimeMillis==-1) {
+                                // 记录指令开始时间
+                                long startTime = System.nanoTime();
+                                while (AL10.alGetSourcei(sourceId, AL10.AL_SOURCE_STATE) == AL10.AL_PLAYING) {
 
-                        if (frame.type == Frame.Type.VIDEO) {
-                            while (!shouldProceed) {
-                                wait(); // 等待 shouldProceed 为 true 时唤醒
-                            }
-                            shouldProceed = false; // 处理完一帧后置为 false，等待下一次唤醒
-                        }
-                        if (frame.type == Frame.Type.AUDIO&&audio) {
-                            ticker.suspend();
-                            while (AL10.alGetSourcei(sourceId, AL10.AL_SOURCE_STATE) == AL10.AL_PLAYING) {
+                                }
+                                // 记录指令结束时间
+                                long endTime = System.nanoTime();
 
+                                // 计算指令执行时间（以纳秒为单位）
+                                long executionTime = endTime - startTime;
+
+                                // 将纳秒转换为毫秒
+                                playSoundTimeMillis = executionTime / 1_000_000.0;
+                            }else {
+                                Thread.sleep((long) playSoundTimeMillis);
+                                while (AL10.alGetSourcei(sourceId, AL10.AL_SOURCE_STATE) == AL10.AL_PLAYING) {
+
+                                }
                             }
-                            ticker.resume();
                         }
                     }
                     // 等待音频播放结束
 
-                    if (audio){
+                    // 删除 OpenAL 源
+                    AL10.alSourceStop(sourceId);
+                    AL10.alDeleteSources(sourceId);
 
-                        // 删除 OpenAL 源
-                        AL10.alSourceStop(sourceId);
-                        AL10.alDeleteSources(sourceId);
-                    }
- 
 
                 } catch (Throwable e) {
                     throw new RuntimeException(e);
                 }
-            }
-            if (audio){
-                // 删除 OpenAL 缓冲区
+            }// 删除 OpenAL 缓冲区
                 AL10.alDeleteBuffers(bufferId);
                 ALC.destroy();
-            }
-            ticker.stop();
-            frameGrabber.stop();
-            frameGrabber.release();
         } catch (Exception e) {
             e.printStackTrace();
         }

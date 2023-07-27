@@ -121,6 +121,7 @@ public class FuncPlayvid implements FuncBase,Runnable {
     }
     @Deprecated(since = "Deprecated")
     public void Caudio() {
+        say("starting OpenAL");
         try {
             FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(args[8]);
             int sampleRate = frameGrabber.getSampleRate();
@@ -177,6 +178,7 @@ public class FuncPlayvid implements FuncBase,Runnable {
                 FuncPlayvid.this.notify();
             }
             grabber.start();
+            say("OpenAL ok!");
             while (( frame = grabber.grabSamples()) != null) {
                 try {
                     int sourceId = 0;
